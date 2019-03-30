@@ -28,7 +28,9 @@ public:
 
 	bool* KEYS;
 
-	const int FPS = 144;				//Desired Speed, determines CPU-Cycles/Second
+	char* d_keychars = "0000abcdefghijklmnopqrstuvwxyz";
+
+	const int FPS = 600;				//Desired Speed, determines CPU-Cycles/Second
 	const unsigned int TICKS_PER_FRAME = 1000 / FPS;
 	uint32_t timer = 0;
 	uint32_t timeDelta = 0;
@@ -106,7 +108,7 @@ public:
 		case 0xee:
 			retrievePCfromStack();
 			//D_Start
-			printf("Returned from subroutine to %04x\n", PC);
+			//printf("Returned from subroutine to %04x\n", PC);
 			//D_End
 			break;
 
@@ -122,7 +124,7 @@ public:
 		PC = nnn;
 
 		//D_Start
-		printf("Jumped to %04x \n", nnn);
+		//printf("Jumped to %04x \n", nnn);
 		//D_End
 	}
 
@@ -131,8 +133,8 @@ public:
 		int nnn = NNN();
 
 		//D_Start
-		printf("PC before Jump to subroutine: %04x\n", PC);
-		printf("PC saved on stack should be that +2, so: %04x\n", PC+2);
+		//printf("PC before Jump to subroutine: %04x\n", PC);
+		//printf("PC saved on stack should be that +2, so: %04x\n", PC+2);
 		//D_End
 
 		/*
@@ -149,7 +151,7 @@ public:
 		PC = nnn; //Jump to subroutine
 
 		//D_Start
-		printf("Called Subroutine at %03x \n", nnn);
+		//printf("Called Subroutine at %03x \n", nnn);
 		//printf("top of stack is now: %04x\n", memory[SP]);										//OBSOLETE as PC takes two places on Stack
 		//D_End
 	}
@@ -162,7 +164,7 @@ public:
 		else PC += 2;
 
 		//D_Start
-		printf("Checked if V[%01x] is %i. (It's %i)\n", x, nn, V[x]);
+		//printf("Checked if V[%01x] is %i. (It's %i)\n", x, nn, V[x]);
 		//D_End
 	}
 
@@ -174,8 +176,18 @@ public:
 		else PC += 2;
 
 		//D_Start
-		printf("Checked if V[%01x] is NOT %i. (It's %i)\n", x, nn, V[x]);
+		//printf("Checked if V[%01x] is NOT %i. (It's %i)\n", x, nn, V[x]);
 		//D_End
+	}
+
+	void Op5() { //5XY0 skips next instruction if V[x] == V[y]
+		int x = (memory[PC] & 0x0f);
+		int y = ((memory[PC+1] & 0xf0) >> 4);
+
+		if(V[x] == V[y])
+			PC+=4;
+		else
+			PC+=2;
 	}
 
 	void Op6() { //6XNN sets V[X] to 0xNN
@@ -188,7 +200,7 @@ public:
 
 
 		//D_Start
-		printf("Set V[%02x] to %02x\n", x, nn);
+		//printf("Set V[%02x] to %02x\n", x, nn);
 		//D_End
 	}
 
@@ -201,7 +213,7 @@ public:
 		PC+=2;
 
 		//D_Start
-		printf("Increased V[%02x] by %02x\n", x, nn);
+		//printf("Increased V[%02x] by %02x\n", x, nn);
 		//D_End
 	}
 
@@ -212,7 +224,7 @@ public:
 		 * Descriptions for the cases taken from wikipedia (https://en.wikipedia.org/wiki/CHIP-8)
 		 */
 		int x = (memory[PC] & 0x0f);
-		int y = (memory[PC+1] & 0xf0);
+		int y = ((memory[PC+1] & 0xf0) >> 4);
 		int z = (memory[PC+1] & 0x0f);
 
 		switch(z) {
@@ -234,13 +246,20 @@ public:
 			break;
 
 		case 0x04: //Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't.
-			V[x] += V[y];
-			//TODO: Implement Carry
+			{uint16_t result = V[x] + V[y];
+			if(result & 0xf0)
+				V[0xf] = 1;
+			else
+				V[0xf] = 0;
+			V[x] = (result &0x0f);} //The {} are neccessary to prevent result from appearing in other cases (even though it isn't used, the compiler doesn't like it)
 			break;
 
 		case 0x05: //VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			if(V[y] > V[x])
+				V[0xf] = 0;
+			else
+				V[0xf] = 1;
 			V[x] -= V[y];
-			//TODO: Implement Borrow
 			break;
 
 		case 0x06: //Stores the least significant bit of VX in VF and then shifts VX to the right by 1.
@@ -249,8 +268,11 @@ public:
 			break;
 
 		case 0x07: //Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			if(V[x] > V[y])
+				V[0xf] = 0;
+			else
+				V[0xf] = 1;
 			V[x] = V[y] - V[x];
-			//TODO: Implement Borrow
 			break;
 
 		case 0x0e: //Stores the most significant bit of VX in VF and then shifts VX to the left by 1.
@@ -269,7 +291,7 @@ public:
 
 	void Op9() { //9XY0 Skips next instruction if V[X] != V[Y]
 		int x = (memory[PC] & 0x0f);
-		int y = (memory[PC+1] & 0xf0);
+		int y = ((memory[PC+1] & 0xf0) >> 4);
 
 		if(V[x] != V[y])
 			PC += 4;
@@ -286,7 +308,17 @@ public:
 		PC+=2;
 
 		//D_Start
-		printf("Set I to %02x\n", nnn);
+		//printf("Set I to %02x\n", nnn);
+		//D_End
+	}
+
+	void OpB() { //BNNN Jumps to NNN+V[0]
+		int nnn = NNN();
+
+		PC = nnn+V[0];
+
+		//D_Start
+		//printf("Jumped to 0x04\n", PC);
 		//D_End
 	}
 
@@ -406,7 +438,7 @@ public:
 		draw = true; //tells emu to redraw the screen
 
 		//D_Start
-		printf("drew a sprite\n");
+		//printf("drew a sprite at the locations in V[%01x] and V[%01x]\n", (memory[PC] & 0x0f) , ((memory[PC + 1] & 0xf0)) >> 4);
 		//D_End
 	}
 
@@ -434,7 +466,7 @@ public:
 		}
 
 		//D_Start
-		printf("Checked if Key number %i was pressed\n", V[x]+4);
+		//printf("Checked if Key number %i (%c) was pressed\n", V[x]+4, d_keychars[V[x]+4]);
 		//D_End
 
 	}
@@ -444,8 +476,21 @@ public:
 		V[x] = delay;
 
 		//D_Start
-		printf("Set V[%02x] to the delay timer (%02x)\n", x, delay);
+		//printf("Set V[%02x] to the delay timer (%02x)\n", x, delay);
 		//D_End
+	}
+
+	void FX0A() { //waits for the next keypress, then stores it in V[X]
+		int x = (memory[PC] & 0x0f);
+		bool waiting = true;
+		while(waiting) {
+			if(SDL_PollEvent(&event)) {
+				if(event.type == SDL_KEYDOWN) {
+					V[x] = event.key.keysym.scancode - 4;
+					waiting = false;
+				}
+			}
+		}
 	}
 
 	void FX15() { //Sets the delay timer to V[X]
@@ -453,7 +498,7 @@ public:
 		delay = V[x];
 
 		//D_Start
-		printf("Delay Timer set to %02x\n", V[x]);
+		//printf("Delay Timer set to %02x\n", V[x]);
 		//D_End
 	}
 
@@ -462,7 +507,7 @@ public:
 		sound = V[x];
 
 		//D_Start
-		printf("Sound Timer set to %02x\n", V[x]);
+		//printf("Sound Timer set to %02x\n", V[x]);
 		//D_End
 	}
 
@@ -471,7 +516,7 @@ public:
 		I += V[x];
 
 		//D_Start
-		printf("Added V[%02x] to I\n", x);
+		//printf("Added V[%02x] to I\n", x);
 		//D_End
 	}
 
@@ -480,7 +525,7 @@ public:
 		I = V[x] * 5;
 
 		//D_Start
-		printf("Set I to the location of %02x\n", V[x]);
+		//printf("Set I to the location of %02x\n", V[x]);
 		//D_End
 	}
 
@@ -498,7 +543,7 @@ public:
 		memory[I+2] = ones;
 
 		//D_Start
-		printf("Stored %02x as a Binary Coded Decimal in memory at I\n", V[x]);
+		//printf("Stored %02x as a Binary Coded Decimal in memory at I\n", V[x]);
 		//D_End
 	}
 
@@ -520,6 +565,10 @@ public:
 
 		case 0x07:
 			FX07();
+			break;
+
+		case 0x0a:
+			FX0A();
 			break;
 
 		case 0x15:
@@ -681,14 +730,14 @@ public:
 			case SDL_KEYDOWN:
 				KEYS[event.key.keysym.scancode] = true;
 				//D_Start
-				printf("Key number %i pressed\n", event.key.keysym.scancode);
+				//printf("Key number %i pressed\n", event.key.keysym.scancode);
 				//D_End
 				break;
 
 			case SDL_KEYUP:
 				KEYS[event.key.keysym.scancode] = false;
 				//D_Start
-				printf("Key number %i no longer pressed\n", event.key.keysym.scancode);
+				//printf("Key number %i no longer pressed\n", event.key.keysym.scancode);
 				//D_End
 				break;
 			}
