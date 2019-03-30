@@ -47,7 +47,7 @@ int main(int argc, char* args[]) {
 	chip8.initialise(rom);
 	chip8.runEmu();
 	chip8.d_printRegisters();
-	chip8.d_printMemory();
+	//chip8.d_printMemory();
 	chip8.freememory();
 
 

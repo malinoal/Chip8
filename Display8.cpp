@@ -47,8 +47,8 @@ public:
 				pixnum = i*8 + (7-j);
 
 				if(display[i] & bit) {
-					pixel.x = pixnum % SCREEN_WIDTH;
-					pixel.y = pixnum / SCREEN_WIDTH;
+					pixel.x = (pixnum % SCREEN_WIDTH) * SCALE_FACTOR;
+					pixel.y = (pixnum / SCREEN_WIDTH) * SCALE_FACTOR;
 					SDL_RenderFillRect(renderer, &pixel);
 
 				}
@@ -58,7 +58,7 @@ public:
 		SDL_RenderPresent(renderer);
 
 		//D_Start
-		SDL_Delay(2000);
+		SDL_Delay(500);
 		//D_End
 
 	}
