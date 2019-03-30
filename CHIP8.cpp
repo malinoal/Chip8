@@ -28,10 +28,11 @@ public:
 
 	bool* KEYS;
 
-	const int FPS = 600;				//Desired Speed, determines CPU-Cycles/Second
+	const int FPS = 144;				//Desired Speed, determines CPU-Cycles/Second
 	const unsigned int TICKS_PER_FRAME = 1000 / FPS;
 	uint32_t timer = 0;
 	uint32_t timeDelta = 0;
+
 
 
 	void initialise(ROM rom) {
@@ -159,6 +160,10 @@ public:
 
 		if(V[x] == nn) PC += 4;
 		else PC += 2;
+
+		//D_Start
+		printf("Checked if V[%01x] is %i. (It's %i)\n", x, nn, V[x]);
+		//D_End
 	}
 
 	void Op4() { //4XNN skips next instruction if V[X] != NN
@@ -167,6 +172,10 @@ public:
 
 		if(V[x] != nn) PC += 4;
 		else PC += 2;
+
+		//D_Start
+		printf("Checked if V[%01x] is NOT %i. (It's %i)\n", x, nn, V[x]);
+		//D_End
 	}
 
 	void Op6() { //6XNN sets V[X] to 0xNN
@@ -258,6 +267,17 @@ public:
 		PC += 2;
 	} //end Op8
 
+	void Op9() { //9XY0 Skips next instruction if V[X] != V[Y]
+		int x = (memory[PC] & 0x0f);
+		int y = (memory[PC+1] & 0xf0);
+
+		if(V[x] != V[y])
+			PC += 4;
+		else
+			PC += 2;
+
+	}
+
 	void OpA() { //ANNN sets I to 0xNNN
 		int nnn = NNN();
 
@@ -279,13 +299,13 @@ public:
 		PC+=2;
 	}
 
-	void OpDBACK() {
+	/*void OpDBACK() { 										//OBSOLETE
 		/*
 		 * DXYN = Draw(V[X], V[Y], N), draws sprite with a height of N pixels stored at I to coordinates V[X], V[Y].
 		 * Pixels get Flipped (XOR), if an active pixel gets flipped to zero V[0xF] gets set to 1, otherwise V[0xF] gets set to 0.
 		 *
 		 * TODO: Drawing is buggy, not sure if the problem is with OpD or with the Display's draw function
-		 */
+		 /
 
 		int x = (memory[PC] & 0x0f);
 		int y = ((memory[PC + 1] & 0xf0)) >> 4;
@@ -326,9 +346,14 @@ public:
 		printf("drew a sprite\n");
 		//D_End
 
-	} //end OpD
+	} */ //end OpD
 
 	void OpD() { //re-implements OpD in an attempt to fix bugs
+		/*
+		 * DXYN = Draw(V[X], V[Y], N), draws sprite with a height of N pixels stored at I to coordinates V[X], V[Y].
+		 * Pixels get Flipped (XOR), if an active pixel gets flipped to zero V[0xF] gets set to 1, otherwise V[0xF] gets set to 0.
+		 */
+
 		int x = V[(memory[PC] & 0x0f)];
 		int y = V[((memory[PC + 1] & 0xf0)) >> 4];
 		int n = (memory[PC + 1] & 0x0f);
@@ -379,6 +404,10 @@ public:
 
 		PC+=2; //increase Program Counter
 		draw = true; //tells emu to redraw the screen
+
+		//D_Start
+		printf("drew a sprite\n");
+		//D_End
 	}
 
 	void OpE() { //Skips instructions dependent on whether or not the key in V[X] is pressed
@@ -428,6 +457,15 @@ public:
 		//D_End
 	}
 
+	void FX18() { //Sets sound timer to V[x]
+		int x = (memory[PC] & 0x0f);
+		sound = V[x];
+
+		//D_Start
+		printf("Sound Timer set to %02x\n", V[x]);
+		//D_End
+	}
+
 	void FX1E() { //I += V[x]
 		int x = (memory[PC] & 0x0f);
 		I += V[x];
@@ -464,6 +502,12 @@ public:
 		//D_End
 	}
 
+	void FX55() { //Stores V[0] to V[X] (including V[X]) in memory starting at address I
+		int x = (memory[PC] & 0x0f);
+		for(int i = 0; i <= x; ++i)
+			memory[I+i] = V[i];
+	}
+
 	void FX65() { //Fills V[0] to V[X] (including V[X]) with values from memory starting at address I
 		int x = (memory[PC] & 0x0f);
 		for(int i = 0; i <= x; ++i) {
@@ -482,6 +526,10 @@ public:
 			FX15();
 			break;
 
+		case 0x18:
+			FX18();
+			break;
+
 		case 0x1e:
 			FX1E();
 			break;
@@ -492,6 +540,10 @@ public:
 
 		case 0x33:
 			FX33();
+			break;
+
+		case 0x55:
+			FX55();
 			break;
 
 		case 0x65:
@@ -550,6 +602,10 @@ public:
 			Op8();
 			break;
 
+		case 0x09:
+			Op9();
+			break;
+
 		case 0x0a:
 			OpA();
 			break;
@@ -580,7 +636,12 @@ public:
 		 * Start of Timer Implementation
 		 */
 		if(delay > 0) delay--;
-		if(sound > 0) sound--;
+
+		if(sound > 0) {
+			sound--;
+			std::cout << '\a'; //creates an alert sound
+		}
+
 
 		timeDelta = SDL_GetTicks() - timer;
 
@@ -589,8 +650,10 @@ public:
 		timer = SDL_GetTicks();
 
 
+
+
 		//D_Start
-		printf("Executed OpCode %04x, at Point %04x\n", opcode, PC);
+		//printf("Executed OpCode %04x, at Point %04x\n", opcode, PC);
 		//D_end
 
 		return success;
