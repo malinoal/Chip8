@@ -58,7 +58,7 @@ public:
 		SDL_RenderPresent(renderer);
 
 		//D_Start
-		SDL_Delay(500);
+		//SDL_Delay(100);
 		//D_End
 
 	}

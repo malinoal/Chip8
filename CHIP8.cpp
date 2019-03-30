@@ -24,6 +24,15 @@ public:
 
 	bool success = true;
 
+	SDL_Event event;
+
+	bool* KEYS;
+
+	const int FPS = 600;				//Desired Speed, determines CPU-Cycles/Second
+	const unsigned int TICKS_PER_FRAME = 1000 / FPS;
+	uint32_t timer = 0;
+	uint32_t timeDelta = 0;
+
 
 	void initialise(ROM rom) {
 		memory = new uint8_t[1024*4](); //the () at the end initializes everything to zero using black magic
@@ -42,6 +51,10 @@ public:
 		display8.initialise();
 
 		initFonts();
+
+		KEYS = new bool[322](); //There are apparently 322 different Keys registered by SDL
+
+		timer = SDL_GetTicks();
 
 	} //end initialise
 
@@ -108,7 +121,7 @@ public:
 		PC = nnn;
 
 		//D_Start
-		printf("Jumped to %02x \n", nnn);
+		printf("Jumped to %04x \n", nnn);
 		//D_End
 	}
 
@@ -148,6 +161,14 @@ public:
 		else PC += 2;
 	}
 
+	void Op4() { //4XNN skips next instruction if V[X] != NN
+		int x = (memory[PC] & 0x0f);
+		int nn = memory[PC+1];
+
+		if(V[x] != nn) PC += 4;
+		else PC += 2;
+	}
+
 	void Op6() { //6XNN sets V[X] to 0xNN
 		int x = (memory[PC] & 0x0f);
 		int nn = memory[PC+1];
@@ -175,6 +196,68 @@ public:
 		//D_End
 	}
 
+	void Op8() {
+		/*
+		 * 8XYZ
+		 * Math Function, does a variety of things with V[X] and V[Y] dependent on Z
+		 * Descriptions for the cases taken from wikipedia (https://en.wikipedia.org/wiki/CHIP-8)
+		 */
+		int x = (memory[PC] & 0x0f);
+		int y = (memory[PC+1] & 0xf0);
+		int z = (memory[PC+1] & 0x0f);
+
+		switch(z) {
+
+		case 0x00: //Sets VX to the value of VY.
+			V[x] = V[y];
+			break;
+
+		case 0x01: //Sets VX to VX or VY. (Bitwise OR operation)
+			V[x] = V[x] | V[y];
+			break;
+
+		case 0x02: //Sets VX to VX and VY. (Bitwise AND operation)
+			V[x] = V[x] & V[y];
+			break;
+
+		case 0x03: //Sets VX to VX xor VY.
+			V[x] = V[x] ^ V[y];
+			break;
+
+		case 0x04: //Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't.
+			V[x] += V[y];
+			//TODO: Implement Carry
+			break;
+
+		case 0x05: //VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			V[x] -= V[y];
+			//TODO: Implement Borrow
+			break;
+
+		case 0x06: //Stores the least significant bit of VX in VF and then shifts VX to the right by 1.
+			V[0xf] = (V[x] & 1);
+			V[x] = V[x] >> 1;
+			break;
+
+		case 0x07: //Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			V[x] = V[y] - V[x];
+			//TODO: Implement Borrow
+			break;
+
+		case 0x0e: //Stores the most significant bit of VX in VF and then shifts VX to the left by 1.
+			V[0xf] = (V[x] & 0x80);
+			V[x] = V[x] << 1;
+			break;
+
+		default:
+			printf("ERROR: OpCode 8XY%01x does not exist", z);
+			success = false;
+
+		}
+
+		PC += 2;
+	} //end Op8
+
 	void OpA() { //ANNN sets I to 0xNNN
 		int nnn = NNN();
 
@@ -196,7 +279,7 @@ public:
 		PC+=2;
 	}
 
-	void OpD() {
+	void OpDBACK() {
 		/*
 		 * DXYN = Draw(V[X], V[Y], N), draws sprite with a height of N pixels stored at I to coordinates V[X], V[Y].
 		 * Pixels get Flipped (XOR), if an active pixel gets flipped to zero V[0xF] gets set to 1, otherwise V[0xF] gets set to 0.
@@ -205,7 +288,7 @@ public:
 		 */
 
 		int x = (memory[PC] & 0x0f);
-		int y = (memory[PC + 1] & 0xf0);
+		int y = ((memory[PC + 1] & 0xf0)) >> 4;
 		int n = (memory[PC + 1] & 0x0f);
 
 		bool Vf = 0;
@@ -245,12 +328,94 @@ public:
 
 	} //end OpD
 
+	void OpD() { //re-implements OpD in an attempt to fix bugs
+		int x = V[(memory[PC] & 0x0f)];
+		int y = V[((memory[PC + 1] & 0xf0)) >> 4];
+		int n = (memory[PC + 1] & 0x0f);
+
+		uint8_t* sprite;
+		int spritebit;
+		uint8_t sourcebit;
+		uint8_t* destbyte_p;
+		uint8_t destbyte;
+		uint8_t destmask;
+		uint8_t destbit;
+
+		V[0xf] = 0; //sets V[F] in case no collision takes place
+
+		for(int i = 0; i < n; ++i) {
+			sprite = &memory[I+i]; //a pointer to the sprite to be drawn
+			spritebit = 7; //which bit of the current row we are currently at
+			for(int j = x; j < (x+8); ++j) {
+
+				sourcebit = (*sprite >> spritebit) & 0x1; //Isolate the bit to be drawn
+
+				if(sourcebit) { //only have to do something if the sourcebit is set
+
+					destbyte_p = &display[(i+y)*(64/8) + (j/8)]; //creates a pointer to the byte on the screen to be drawn on
+
+					destbyte = *destbyte_p; //gets the current contents of the screen at that byte
+
+					destmask = (0x80 >> (j%8)); //creates a mask that has only a bit set where it's currently relevant
+
+					destbit = destbyte & destmask; //applies the mask to the destination byte in order to determine the destination bit
+
+					sourcebit = sourcebit << (7 - (j%8)); //shifts the sourcebit to be at the same position as the destination bit
+
+					if(sourcebit & destbit) //if both are set
+						V[0xf] = 1; 		//set V[F] to 1
+
+					destbit ^= sourcebit; //do the XOR
+
+					destbyte = (destbyte & ~destmask) | destbit; //apllies the XOR to the actual byte, the ~ inverts the mask
+
+					*destbyte_p = destbyte; //applies the changes, so far we've been working with a copy
+
+				}
+
+				spritebit--; //Do the next bit
+			}
+		}
+
+		PC+=2; //increase Program Counter
+		draw = true; //tells emu to redraw the screen
+	}
+
+	void OpE() { //Skips instructions dependent on whether or not the key in V[X] is pressed
+		int x = (memory[PC] & 0x0f);
+		switch(memory[PC+1]) {
+
+		case 0x9e: //Skip if Key is pressed
+			if(KEYS[V[x]+4])
+				PC+=4;
+			else
+				PC+=2;
+			break;
+
+		case 0xa1: //Skip if Key is not pressed
+			if(!KEYS[V[x]+4])
+				PC+=4;
+			else
+				PC+=2;
+			break;
+
+		default:
+			printf("ERROR: Opcode EX%02x does not exist", memory[PC+1]);
+			success = false;
+		}
+
+		//D_Start
+		printf("Checked if Key number %i was pressed\n", V[x]+4);
+		//D_End
+
+	}
+
 	void FX07() { //Sets V[X] to the value of the delay timer
 		int x = (memory[PC] & 0x0f);
 		V[x] = delay;
 
 		//D_Start
-		printf("Set V[%02x] to the delay timer (%02x)\n Timers aren't implemented yet though\n", x, delay);
+		printf("Set V[%02x] to the delay timer (%02x)\n", x, delay);
 		//D_End
 	}
 
@@ -259,7 +424,16 @@ public:
 		delay = V[x];
 
 		//D_Start
-		printf("Delay Timer set to %02x\n Timers aren't implemented yet though\n", V[x]);
+		printf("Delay Timer set to %02x\n", V[x]);
+		//D_End
+	}
+
+	void FX1E() { //I += V[x]
+		int x = (memory[PC] & 0x0f);
+		I += V[x];
+
+		//D_Start
+		printf("Added V[%02x] to I\n", x);
 		//D_End
 	}
 
@@ -306,6 +480,10 @@ public:
 
 		case 0x15:
 			FX15();
+			break;
+
+		case 0x1e:
+			FX1E();
 			break;
 
 		case 0x29:
@@ -356,12 +534,20 @@ public:
 			Op3();
 			break;
 
+		case 0x04:
+			Op4();
+			break;
+
 		case 0x06:
 			Op6();
 			break;
 
 		case 0x07:
 			Op7();
+			break;
+
+		case 0x08:
+			Op8();
 			break;
 
 		case 0x0a:
@@ -376,6 +562,10 @@ public:
 			OpD();
 			break;
 
+		case 0x0e:
+			OpE();
+			break;
+
 		case 0x0f:
 			OpF();
 			break;
@@ -387,10 +577,21 @@ public:
 		} //end switch
 
 		/*
-		 * Start of Timer Implementation, these will have to be limited to 60 Hz at some point
+		 * Start of Timer Implementation
 		 */
 		if(delay > 0) delay--;
 		if(sound > 0) sound--;
+
+		timeDelta = SDL_GetTicks() - timer;
+
+		if (timeDelta < TICKS_PER_FRAME) SDL_Delay(TICKS_PER_FRAME - timeDelta);
+
+		timer = SDL_GetTicks();
+
+
+		//D_Start
+		printf("Executed OpCode %04x, at Point %04x\n", opcode, PC);
+		//D_end
 
 		return success;
 	} //end runOP
@@ -401,6 +602,32 @@ public:
 			if(draw) {
 				display8.draw(display);
 				draw = false;
+			}
+			detectKeyboard();
+		}
+	}
+
+	void detectKeyboard() {
+		while(SDL_PollEvent(&event)) {
+			switch(event.type) {
+
+			case SDL_QUIT:
+				success = false;
+				break;
+
+			case SDL_KEYDOWN:
+				KEYS[event.key.keysym.scancode] = true;
+				//D_Start
+				printf("Key number %i pressed\n", event.key.keysym.scancode);
+				//D_End
+				break;
+
+			case SDL_KEYUP:
+				KEYS[event.key.keysym.scancode] = false;
+				//D_Start
+				printf("Key number %i no longer pressed\n", event.key.keysym.scancode);
+				//D_End
+				break;
 			}
 		}
 	}
